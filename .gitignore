@@ -1,0 +1,15 @@
+.vscode
+.env
+
+.Rhistory
+*.Rproj
+.Rproj.user
+
+Pipfile
+Pipfile.lock
+
+superados
+
+*.html
+*.xlsx
+*.ipynb
