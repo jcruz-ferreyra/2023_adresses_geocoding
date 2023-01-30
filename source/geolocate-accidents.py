@@ -15,13 +15,42 @@ from dotenv import load_dotenv
 from opencage.geocoder import OpenCageGeocode
 
 
-def print_full(x):
-    pd.set_option("display.max_rows", len(x))
-    print(x)
-    pd.reset_option("display.max_rows")
+def city_filler(df, city, fill, ids_list):
+    """
+    This function completes the addresses queries with information about city, prov, country
+    of observations with any hint about that (except for observations located in Rosario)
+
+    :df: Original dataframe with an address column.
+    :city: Some kind of pattern or string referring to a city of Gran Rosario.
+    :fill: Desired name of the corresponding city.
+
+    :return: Dataframe with new information in the address column + IDs of corrected observations.
+    """
+    mask = df.apply(lambda r: bool(re.search(city, r["direccion_avp"])), axis=1)
+    df.loc[mask, "direccion_avp"] = (
+        df.loc[mask, "direccion_avp"]
+        .str.replace("-", "")
+        .str.replace(city, "")
+        .str.strip()
+    ) + f", {fill}, Santa Fe, Argentina"
+
+    ids_no_rosario = df.loc[mask, "id"].tolist()
+
+    ids_list = ids_list + ids_no_rosario
+
+    return df, ids_list
 
 
 def map_plotter(df, ids_wrong):
+    """
+    This function plots every observation in passed dataframe into a Folium Map (interactive).
+    It prints in green every observation except for those that the user marks as wrongly geocoded.
+
+    :df: Dataframe with Latitude and Longitude column.
+    :ids_wrong: List of IDs of wrongly geocoded addresses.
+
+    :return: Folium Map (interactive).
+    """
     rosario_coords = [-32.940506, -60.712480]
 
     # Create the map
@@ -48,6 +77,13 @@ def map_plotter(df, ids_wrong):
 
 
 def ids_validator(id):
+    """
+    This function checks format of ID inputted by the user.
+
+    :id: String ID to check.
+
+    :return: Raise Exception or pass.
+    """
     if id == "t":
         return
     elif len(id) != len_id:
@@ -61,6 +97,14 @@ def ids_validator(id):
 
 
 def ids_adder(list_ok, list_wrong):
+    """
+    This function ask the user to enter IDs of wrongly geocoded observations.
+
+    :list_ok: List of IDs present in plotted dataframe.
+    :list_wrong: List of wrongly geocoded observation's IDs into which append new ones.
+
+    :return: List of wrongly geocoded observation's Ids with new ones.
+    """
     response = ""
 
     while response != "t":
@@ -83,7 +127,14 @@ def ids_adder(list_ok, list_wrong):
     return list_wrong
 
 
-def ids_remover(list_ok, list_wrong):
+def ids_remover(list_wrong):
+    """
+    This function ask the user to enter IDs of rightly geocoded observations present in wrong ones list.
+
+    :list_wrong: List of wrongly geocoded observation's IDs from which remove some.
+
+    :return: List of wrongly geocoded observation's Ids without removed ones.
+    """
     response = ""
 
     while response != "t":
@@ -107,6 +158,22 @@ def ids_remover(list_ok, list_wrong):
 
 
 def geo_checker(df, list_right, list_wrong):
+    """
+    This function provides some options to add or remove IDs to/from
+    the list of wrongly geocoded observation's IDs.
+    It acts as some kind of organizer of the three main functions to complete the task:
+        - map_plotter()
+        - ids_adder()
+        - ids_remover()
+    It displays interactive maps in the browser so that user can check if addresses were
+    rightly geocoded.
+
+    :df: Dataframe with geocoded observations with Latitude and Longitude columns.
+    :list_right: List of IDs present in the geocoded dataframe.
+    :list_wrong: List into which add or remove wrongly geocoded observation's IDs.
+
+    :return: List of wrongly geocoded observations Ids.
+    """
     output_file = main_path / "graphs/map_geo.html"
 
     map_geo = map_plotter(df, list_wrong)
@@ -153,30 +220,17 @@ def geo_checker(df, list_right, list_wrong):
                 response
                 == "Eliminar de las observaciones erroneamente geocodificadas un ID."
             ):
-                list_wrong = ids_remover(list_right, list_wrong)
+                list_wrong = ids_remover(list_wrong)
             elif response == "Confirmar los cambios y continuar.":
                 break
 
     return list_wrong
 
 
-def city_filler(df, city, fill, ids_list):
-    mask = df.apply(lambda r: bool(re.search(city, r["direccion_avp"])), axis=1)
-    df.loc[mask, "direccion_avp"] = (
-        df.loc[mask, "direccion_avp"]
-        .str.replace("-", "")
-        .str.replace(city, "")
-        .str.strip()
-    ) + f", {fill}, Santa Fe, Argentina"
-
-    ids_no_rosario = df.loc[mask, "id"].tolist()
-
-    ids_list = ids_list + ids_no_rosario
-
-    return df, ids_list
-
-
 def oc_geocoder(geocoder, x):
+    """
+    This function geocodes observations and get Latitude and Longitude information with OpenCage service.
+    """
     results = geocoder.geocode(x)
     lat = results[0]["geometry"]["lat"]
     lon = results[0]["geometry"]["lng"]
@@ -184,6 +238,9 @@ def oc_geocoder(geocoder, x):
 
 
 def esri_geocoder(x):
+    """
+    This function geocodes observations and get Latitude and Longitude information with ESRI service.
+    """
     results = geocode(x)
     lat = str(results[0]["location"]["y"])
     lon = str(results[0]["location"]["x"])
@@ -409,12 +466,13 @@ list_oc = []
 list_oc_lat = []
 list_oc_lon = []
 
+print("- Comienzo de la geocodificación con el servicio OpenCage -")
 for address in list_addresses_oc:
     lat = lon = np.NaN
     try:
         lat, lon = oc_geocoder(geocoder, address)
     except Exception as e:
-        print("Can not geocode address: " + address)
+        print("No se pudo geolocalizar la dirección: " + address)
         print(e)
     list_oc_lat.append(lat)
     list_oc_lon.append(lon)
@@ -445,7 +503,7 @@ df_geo_oc = df_geo_oc.loc[mask, :]
 
 # --- Geocode remaining adresses with Esri ---
 # Get adresses to geocode as a list
-mask = ~df1["id"].isin(ids_geo_oc_ok)
+mask = ~df1["id"].isin(ids_geo_oc_wrong)
 df_geo_esri = df1.loc[mask, :]
 
 list_addresses_esri = df_geo_esri["direccion_avp"].tolist()
@@ -458,6 +516,7 @@ list_esri = []
 list_esri_lat = []
 list_esri_lon = []
 
+print("- Comienzo de la geocodificación con el servicio ESRI de ArcGis -")
 for address in list_addresses_esri:
     lat = lon = np.NaN
     try:
@@ -503,6 +562,7 @@ except:
 while True:
     try:
         df_total.to_excel(dest_path / dest_filename, index=False)
+        print("- Archivo guardado correctamente")
         break
     except Exception as e:
         print(e)
