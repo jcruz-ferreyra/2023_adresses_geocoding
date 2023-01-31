@@ -14,6 +14,56 @@ from arcgis.gis import GIS
 from dotenv import load_dotenv
 from opencage.geocoder import OpenCageGeocode
 
+dummy_bool = False
+if dummy_bool:
+    """
+    These are modules that are required by arcgis and are installed as dependencies.
+    The problem is that the importing inside the arcgis module is dynamic,
+    so py-installer do not take them in account when compiling the script into an .exe file.
+    Adding these lines of declared imports makes py-installer to consider the modules in the
+    .exe file that it creates, allowing arcgis module to access them.
+    """
+    import arcgis.env as arcgis_env
+    import arcgis as arcgis
+    import arcgis.gis.agoserver._api as _agoserver
+    import arcgis._impl.common._mixins as _mixins
+    import arcgis._impl.common._utils as _common_utils
+    import arcgis._impl.common._deprecate as _common_deprecated
+    import arcgis.gis._impl._portalpy as _portalpy
+    import arcgis.gis._impl._jb as _jb
+
+    import requests_ntlm
+    import requests
+    import requests_negotiate_sspi
+    import requests_gssapi
+    import requests_kerberos
+
+
+# --- Instrucciones para uso del programa ---
+instructions = """
+Para poder correr el programa se puede tener el .exe en un directorio a gusto del usuario.
+En el mismo directorio se deberá tener una carpeta con el nombre 'data' y un archivo '.env' con las credenciales.
+Dentro de la carpeta 'data', una subcarpeta con el año(aaaa) como nombre.
+Dentro de la carpeta con nombre del año, el archivo a geocodificar cuyo nombre debe tener el siguiente formato:
+'Avp <mes(mm)> del <anio(aaaa)> con género.xlsx'
+
+El dataset utilizado debe tener columnas con los siguientes nombres:
+- 'fecha de ingreso'
+- 'lugar del avp'
+"""
+
+print(instructions)
+
+response = pyip.inputYesNo(
+    prompt="Ingrese 'si' en caso de cumplir los requerimientos. 'no' para salir. ('si/no') \n",
+    yesVal="si",
+    noVal="no",
+)
+
+if response == "si":
+    pass
+elif response == "no":
+    sys.exit(1)
 
 def city_filler(df, city, fill, ids_list):
     """
@@ -105,6 +155,8 @@ def ids_adder(list_ok, list_wrong):
 
     :return: List of wrongly geocoded observation's Ids with new ones.
     """
+    print()
+
     response = ""
 
     while response != "t":
@@ -174,7 +226,7 @@ def geo_checker(df, list_right, list_wrong):
 
     :return: List of wrongly geocoded observations Ids.
     """
-    output_file = main_path / "graphs/map_geo.html"
+    output_file = map_path / "map_geo.html"
 
     map_geo = map_plotter(df, list_wrong)
     map_geo.save(output_file)
@@ -272,7 +324,7 @@ while True:
     break
 
 while True:
-    mes = input("Ingresa el mes de los datos a geocodificar (aa):")
+    mes = input("Ingresa el mes de los datos a geocodificar (mm):")
     if len(mes) != 2:
         print(f"El mes ingresado debe tener 2 caracteres numéricos")
         continue
@@ -284,16 +336,17 @@ while True:
     break
 
 # Set starting variables
-os.chdir(sys.path[0])
+os.chdir(input("Ingrese la ruta del directorio en el cual trabajar:\n"))
 
-main_path = Path.cwd() / "../"
+main_path = Path.cwd()  # / "../"
 orig_filename = f"Avp {mes} del {anio} con género.xlsx"
 dest_filename = f"{anio}-{mes}_AVP-geocoded.xlsx"
 log_filename = f"{anio}-{mes}_AVP-geocoded.log"
 
-orig_path = main_path / "data/raw"
+orig_path = main_path / f"data/{anio}"
 dest_path = main_path / f"results/{anio}"
 log_path = main_path / f"logs/{anio}"
+map_path = main_path / "graphs"
 
 # Read main dataframe
 try:
@@ -303,6 +356,7 @@ except Exception as e:
     print(f"Búsqueda de: {orig_filename}")
     print(f"Búsqueda en: {orig_path}")
     print()
+    input("Presione enter para salir.")
     sys.exit(1)
 
 # Create destination folders
@@ -310,6 +364,8 @@ if not os.path.isdir(dest_path):
     os.makedirs(dest_path)
 if not os.path.isdir(log_path):
     os.makedirs(log_path)
+if not os.path.isdir(map_path):
+    os.makedirs(map_path)
 
 # Set up configuration for logging to a file and to the console
 logger = logging.getLogger(__name__)
@@ -329,17 +385,14 @@ logger.addHandler(file_handler)
 
 
 # --- TRANSFORM DATASET ---
-# Format column names
-dict_rename = {
-    "Fecha de ingreso": "fecha_ingreso",
-    "hora de ingreso": "hora_ingreso",
-    "fecha del AVP": "fecha_avp",
-    "hora del AVP": "hora_avp",
-    "categoria horaria": "hora_avp_cat",
-    "lugar del AVP": "direccion_avp",
-}
 
+# Format column names
+df.columns = [x.lower() for x in df.columns]
+
+dict_rename = {"fecha de ingreso": "fecha_ingreso", "lugar del avp": "direccion_avp"}
 df.rename(columns=dict_rename, inplace=True)
+
+df.columns = df.columns.str.replace(' ', '_')
 
 # Create unique ID for each row
 n_rows = len(df.index)
@@ -459,7 +512,11 @@ df_geo_oc = df1.loc[~mask, :]
 list_addresses_oc = df_geo_oc["direccion_avp"].tolist()
 
 # Set geocoder object using the corresponding apikey
-geocoder = OpenCageGeocode(oc_apikey)
+try:
+    geocoder = OpenCageGeocode(oc_apikey)
+except Exception as e:
+    logger.error(e, exc_info=True)
+    raise
 
 # Geocode list of addresses and add Latitude and Longitude to the dataframe
 list_oc = []
@@ -472,10 +529,11 @@ for address in list_addresses_oc:
     try:
         lat, lon = oc_geocoder(geocoder, address)
     except Exception as e:
-        print("No se pudo geolocalizar la dirección: " + address)
-        print(e)
+        logger.debug("Can not geocode address: " + address)
+        logger.debug(e)
     list_oc_lat.append(lat)
     list_oc_lon.append(lon)
+    
 
 df_geo_oc["lat"] = list_oc_lat
 df_geo_oc["lon"] = list_oc_lon
@@ -509,7 +567,11 @@ df_geo_esri = df1.loc[mask, :]
 list_addresses_esri = df_geo_esri["direccion_avp"].tolist()
 
 # Set gis object using the corresponding user, password, apikey
-gis = GIS(username=esri_user, password=esri_pass, api_key=esri_apikey)
+try:
+    gis = GIS(username=esri_user, password=esri_pass, api_key=esri_apikey)
+except Exception as e:
+    logger.error(e, exc_info=True)
+    raise
 
 # Geocode list of addresses and add Latitude and Longitude to the dataframe
 list_esri = []
@@ -522,8 +584,8 @@ for address in list_addresses_esri:
     try:
         lat, lon = esri_geocoder(address)
     except Exception as e:
-        print("Can not geocode address: " + address)
-        print(e)
+        logger.debug("Can not geocode address: " + address)
+        logger.debug(e)
     list_esri_lat.append(lat)
     list_esri_lon.append(lon)
 
@@ -556,7 +618,8 @@ df_total = pd.concat(df_list, axis=0)
 
 try:
     assert df.shape[0] == df_total.shape[0]
-except:
+except Exception as e:
+    logger.error(e, exc_info=True)
     pass
 
 while True:
