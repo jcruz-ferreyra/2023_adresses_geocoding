@@ -9,8 +9,11 @@ Pipfile
 Pipfile.lock
 
 superados
+dist
+build
 
 *.html
 *.xlsx
 *.ipynb
 *.log
+*.spec
