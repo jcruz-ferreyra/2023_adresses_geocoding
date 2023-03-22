@@ -48,6 +48,7 @@ Dentro de la carpeta con nombre del año, el archivo a geocodificar cuyo nombre 
 'Avp <mes(mm)> del <anio(aaaa)> con género.xlsx'
 
 El dataset utilizado debe tener columnas con los siguientes nombres:
+- 'id'
 - 'fecha de ingreso'
 - 'lugar del avp'
 """
@@ -64,6 +65,7 @@ if response == "si":
     pass
 elif response == "no":
     sys.exit(1)
+
 
 def city_filler(df, city, fill, ids_list):
     """
@@ -163,7 +165,12 @@ def ids_adder(list_ok, list_wrong):
         print(
             "Ingrese un ID para agregar a las direcciones erroneamente geocodificadas ('t' para terminar): "
         )
-        response = pyip.inputCustom(ids_validator)
+        while True:
+            try:
+                response = pyip.inputCustom(ids_validator)
+                break
+            except KeyboardInterrupt:
+                continue
         if response == "t":
             break
         if response not in list_ok:
@@ -193,7 +200,12 @@ def ids_remover(list_wrong):
         print(
             "Ingrese un ID a eliminar de las direcciones erroneamente geocodificadas ('t' para terminar): "
         )
-        response = pyip.inputCustom(ids_validator)
+        while True:
+            try:
+                response = pyip.inputCustom(ids_validator)
+                break
+            except KeyboardInterrupt:
+                continue
         if response == "t":
             break
         if response not in list_wrong:
@@ -202,7 +214,6 @@ def ids_remover(list_wrong):
             )
             continue
         elif response in list_wrong:
-
             list_wrong.remove(response)
             print("ID aceptado \n")
 
@@ -352,10 +363,31 @@ map_path = main_path / "graphs"
 try:
     df = pd.read_excel(orig_path / orig_filename)
 except Exception as e:
-    print("Archivo no encontrado.")
+    print("Error: Archivo no encontrado.")
     print(f"Búsqueda de: {orig_filename}")
     print(f"Búsqueda en: {orig_path}")
     print()
+    input("Presione enter para salir.")
+    sys.exit(1)
+
+# Validate id column
+if df["id"].isnull().any():
+    print()
+    print("Error: La columna 'id' no debe tener celdas vacías.")
+    input("Presione enter para salir.")
+    sys.exit(1)
+
+try:
+    df["id"] = df["id"].astype("int64")
+except:
+    print()
+    print("Error: La columna 'id' debe tener sólo valores numéricos.")
+    input("Presione enter para salir.")
+    sys.exit(1)
+
+if df["id"].duplicated().any():
+    print()
+    print("Error: La columna 'id' no debe tener celdas repetidas.")
     input("Presione enter para salir.")
     sys.exit(1)
 
@@ -392,15 +424,13 @@ df.columns = [x.lower() for x in df.columns]
 dict_rename = {"fecha de ingreso": "fecha_ingreso", "lugar del avp": "direccion_avp"}
 df.rename(columns=dict_rename, inplace=True)
 
-df.columns = df.columns.str.replace(' ', '_')
+df.columns = df.columns.str.replace(" ", "_")
 
 # Create unique ID for each row
 n_rows = len(df.index)
 n_digits = len(str(n_rows))
 
-df["id"] = df["fecha_ingreso"].astype(str).str.replace("-", "") + df["id"].astype(
-    str
-).str.zfill(n_digits)
+df["id"] = anio + mes + df["id"].astype(str).str.zfill(n_digits)
 
 len_id = len(df.loc[0, "id"])
 
@@ -533,7 +563,7 @@ for address in list_addresses_oc:
         logger.debug(e)
     list_oc_lat.append(lat)
     list_oc_lon.append(lon)
-    
+
 
 df_geo_oc["lat"] = list_oc_lat
 df_geo_oc["lon"] = list_oc_lon
