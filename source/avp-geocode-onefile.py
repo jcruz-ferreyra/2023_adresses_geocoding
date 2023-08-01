@@ -12,8 +12,32 @@ import pyinputplus as pyip
 from arcgis.geocoding import geocode
 from arcgis.gis import GIS
 from dotenv import load_dotenv
-from fun.formatqueries import queries_formatter
 from opencage.geocoder import OpenCageGeocode
+
+dummy_bool = False
+if dummy_bool:
+    """
+    These are modules that are required by arcgis and are installed as dependencies.
+    The problem is that the importing inside the arcgis module is dynamic,
+    so py-installer do not take them in account when compiling the script into an .exe file.
+    Adding these lines of declared imports makes py-installer to consider the modules in the
+    .exe file that it creates, allowing arcgis module to access them.
+    """
+    import arcgis.env as arcgis_env
+    import arcgis as arcgis
+    import arcgis.gis.agoserver._api as _agoserver
+    import arcgis._impl.common._mixins as _mixins
+    import arcgis._impl.common._utils as _common_utils
+    import arcgis._impl.common._deprecate as _common_deprecated
+    import arcgis.gis._impl._portalpy as _portalpy
+    import arcgis.gis._impl._jb as _jb
+
+    import requests_ntlm
+    import requests
+    import requests_negotiate_sspi
+    import requests_gssapi
+    import requests_kerberos
+
 
 # --- Instrucciones para uso del programa ---
 instructions = """
@@ -41,6 +65,32 @@ if response == "si":
     pass
 elif response == "no":
     sys.exit(1)
+
+
+def city_filler(df, city, fill, ids_list):
+    """
+    This function completes the addresses queries with information about city, prov, country
+    of observations with any hint about that (except for observations located in Rosario)
+
+    :df: Original dataframe with an address column.
+    :city: Some kind of pattern or string referring to a city of Gran Rosario.
+    :fill: Desired name of the corresponding city.
+
+    :return: Dataframe with new information in the address column + IDs of corrected observations.
+    """
+    mask = df.apply(lambda r: bool(re.search(city, r["direccion_avp"])), axis=1)
+    df.loc[mask, "direccion_avp"] = (
+        df.loc[mask, "direccion_avp"]
+        .str.replace("-", "")
+        .str.replace(city, "")
+        .str.strip()
+    ) + f", {fill}, Santa Fe, Argentina"
+
+    ids_no_rosario = df.loc[mask, "id"].tolist()
+
+    ids_list = ids_list + ids_no_rosario
+
+    return df, ids_list
 
 
 def map_plotter(df, ids_wrong):
@@ -398,7 +448,90 @@ mask = df["direccion_orig"].isnull()
 df_geo_na = df.loc[mask, :]
 df1 = df.loc[~mask, :]
 
-df1 = queries_formatter(df1)
+# Format queries, adding city of location as suffix and changing some streets names
+ids_rosario_no = []
+dict_cities = {
+    "vgg": "Villa Gobernador Galvez",
+    "luis palacios": "Luis Palacios",
+    "casilda": "Casilda",
+    "funes": "Funes",
+    "roldan": "Roldan",
+    "soldini": "Soldini",
+}
+
+for k, v in dict_cities.items():
+    df1, ids_rosario_no = city_filler(df1, k, v, ids_rosario_no)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace("ref ", "")
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace("/", " y ")
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"circun\w*\s?", "Avenida de Circunvalación 25 de Mayo ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?27 de feb\w*\s?", "Bulevar 27 de Febrero ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(bulevar\w*\s)?(bv)?(av\w*\s)?oroño\s?",
+    "Bulevar Nicasio Oroño ",
+    regex=True,
+    case=False,
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(bulevar\w*\s)?(bv)?(av\w*\s)?rond\w*\s?",
+    "Bulevar General José Rondeau ",
+    regex=True,
+    case=False,
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?uriburu\s?", "Avenida José Uriburu ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?san mart\w*\s?", "Avenida José de San Martín ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(ovidio\s)?lagos\s?", "Avenida Ovidio Lagos ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?pel(l)?egrini\s?", "Avenida Carlos Pellegrini ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?francia\s?", "Avenida Francia ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"(av\w*\s)?godoy\s?", "Avenida Presidente Perón ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"colectora\s?", "Colectora Juan Pablo II ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"a(0)?(o)?(\s)?12", "Ruta Nacional A012 ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"b(\w*)?\s*(y)?\s*ordoñez", "Avenida Battle y Ordoñez ", regex=True, case=False
+)
+
+df1["direccion_avp"] = df1["direccion_avp"].str.replace(
+    r"\s+", " ", regex=True, case=False
+)
+
+mask = ~df1["id"].isin(ids_rosario_no)
+df1.loc[mask, "direccion_avp"] = (
+    df1.loc[mask, "direccion_avp"].str.strip() + ", Rosario, Santa Fe, Argentina"
+)
 
 
 # --- Geocode addresses with OpenCage ---
